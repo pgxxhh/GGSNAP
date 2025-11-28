@@ -1,0 +1,7 @@
+{
+  "name": "GGSnap",
+  "description": "An instant camera app that transforms your selfies into game character avatars using AI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
