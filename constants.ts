@@ -722,3 +722,28 @@ export const POLAROID_DIMENSIONS = {
   width: 320,
   height: 400,
 };
+
+// --- DEMO GALLERY CONFIGURATION ---
+// These are the photos shown in the "Archive" when a user first visits the site.
+export const DEMO_ITEMS_CONFIG = [
+  {
+    id: 'demo-1',
+    characterId: 'jinx', 
+    generatedUrl: 'https://storage.googleapis.com/ggsnap-images/ggsnap-1764412712888.png', 
+  },
+  {
+    id: 'demo-2',
+    characterId: 'jett', 
+    generatedUrl: 'https://storage.googleapis.com/ggsnap-images/toon-1764322853685.png',
+  },
+  {
+    id: 'demo-3',
+    characterId: 'killjoy', 
+    generatedUrl: 'https://storage.googleapis.com/ggsnap-images/toon-1764323292998.png',
+  },
+  {
+    id: 'demo-4',
+    characterId: 'chamber', 
+    generatedUrl: 'https://storage.googleapis.com/ggsnap-images/toon-1764324249880.png',
+  },
+];

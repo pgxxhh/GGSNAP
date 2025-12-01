@@ -1,14 +1,29 @@
-import React, { useState, useCallback } from 'react';
+
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { CyberpunkCamera } from './components/CyberpunkCamera';
 import { HeroList } from './components/HeroList';
 import { PhotoWall } from './components/PhotoWall';
 import { Character, GalleryItem } from './types';
 import { generateToonAvatar } from './services/geminiService';
-import { CHARACTERS } from './constants';
+import { CHARACTERS, DEMO_ITEMS_CONFIG } from './constants';
 
 const App: React.FC = () => {
-  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(CHARACTERS[0]);
-  const [gallery, setGallery] = useState<GalleryItem[]>([]);
+  // --- DEMO DATA INITIALIZATION ---
+  const getDemoItems = (): GalleryItem[] => {
+    return DEMO_ITEMS_CONFIG.map((item, index) => ({
+        id: item.id,
+        original: '',
+        generated: item.generatedUrl,
+        characterId: item.characterId,
+        timestamp: Date.now() - (index * 60000)
+    }));
+  };
+
+  // Initialize to null to force user to select a hero first (Step 1)
+  const [selectedCharacter, setSelectedCharacter] = useState<Character | null>(null);
+  // Initialize gallery with demo items
+  const [gallery, setGallery] = useState<GalleryItem[]>(getDemoItems());
+  
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentProcessingImage, setCurrentProcessingImage] = useState<string | null>(null);
   const [lastGeneratedImage, setLastGeneratedImage] = useState<string | null>(null);
@@ -16,6 +31,109 @@ const App: React.FC = () => {
   
   // Mobile Navigation State: 'camera' (default), 'heroes', 'gallery'
   const [mobileView, setMobileView] = useState<'camera' | 'heroes' | 'gallery'>('camera');
+
+  // Camera Transform State for Drag & Zoom
+  const [cameraTransform, setCameraTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [isDraggingCamera, setIsDraggingCamera] = useState(false);
+  const dragStartPos = useRef({ x: 0, y: 0 });
+  const startTransform = useRef({ x: 0, y: 0 });
+
+  // Mobile Touch Refs
+  const touchStartDist = useRef<number>(0);
+  const touchStartScale = useRef<number>(1);
+  const touchStartPos = useRef({ x: 0, y: 0 });
+  const touchStartCameraPos = useRef({ x: 0, y: 0 });
+
+  // Handle Global Drag Events (Desktop)
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingCamera) return;
+      const dx = e.clientX - dragStartPos.current.x;
+      const dy = e.clientY - dragStartPos.current.y;
+      setCameraTransform(prev => ({
+        ...prev,
+        x: startTransform.current.x + dx,
+        y: startTransform.current.y + dy
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingCamera(false);
+    };
+
+    if (isDraggingCamera) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingCamera]);
+
+  const handleCameraMouseDown = (e: React.MouseEvent) => {
+    // Prevent dragging if clicking on buttons inside the camera
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return;
+    
+    e.preventDefault(); 
+    setIsDraggingCamera(true);
+    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    startTransform.current = { ...cameraTransform };
+  };
+
+  const handleCameraWheel = (e: React.WheelEvent) => {
+    e.stopPropagation(); // Prevent page scroll
+    const scaleAmount = -e.deltaY * 0.001;
+    // Clamp scale between 0.5x and 1.5x
+    const newScale = Math.min(Math.max(0.5, cameraTransform.scale + scaleAmount), 1.5);
+    setCameraTransform(prev => ({ ...prev, scale: newScale }));
+  };
+
+  // --- MOBILE TOUCH LOGIC ---
+  const getTouchDist = (touches: React.TouchList) => {
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    // Avoid interfering with UI controls
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return;
+
+    if (e.touches.length === 1) {
+      // Panning
+      touchStartPos.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      touchStartCameraPos.current = { x: cameraTransform.x, y: cameraTransform.y };
+    } else if (e.touches.length === 2) {
+      // Pinch Zoom
+      touchStartDist.current = getTouchDist(e.touches);
+      touchStartScale.current = cameraTransform.scale;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    // Avoid interfering with UI controls
+    if ((e.target as HTMLElement).closest('button') || (e.target as HTMLElement).closest('a')) return;
+
+    if (e.touches.length === 1) {
+      // Panning
+      const dx = e.touches[0].clientX - touchStartPos.current.x;
+      const dy = e.touches[0].clientY - touchStartPos.current.y;
+      setCameraTransform(prev => ({
+        ...prev,
+        x: touchStartCameraPos.current.x + dx,
+        y: touchStartCameraPos.current.y + dy
+      }));
+    } else if (e.touches.length === 2) {
+      // Pinch Zoom
+      const newDist = getTouchDist(e.touches);
+      if (touchStartDist.current > 0) {
+        const scaleFactor = newDist / touchStartDist.current;
+        const newScale = Math.min(Math.max(0.5, touchStartScale.current * scaleFactor), 1.5);
+        setCameraTransform(prev => ({ ...prev, scale: newScale }));
+      }
+    }
+  };
 
   const handleCapture = useCallback(async (base64: string) => {
     if (!selectedCharacter || isProcessing) return;
@@ -38,7 +156,15 @@ const App: React.FC = () => {
 
       // Add to gallery AFTER the "Developing" animation finishes visually in the Camera component
       setTimeout(() => {
-          setGallery(prev => [...prev, newItem]);
+          setGallery(prev => {
+              // Check if we are still in "demo mode" (gallery has demo items)
+              // If so, clear them all and start fresh with the user's first photo
+              const hasDemo = prev.some(i => i.id.startsWith('demo-'));
+              if (hasDemo) {
+                  return [newItem];
+              }
+              return [...prev, newItem];
+          });
           setIsProcessing(false); 
           setCurrentProcessingImage(null); // Clear the printer slot
           
@@ -141,9 +267,9 @@ const App: React.FC = () => {
              />
          </div>
 
-         {/* PRIVACY FOOTER */}
+         {/* PRIVACY FOOTER & CREDITS */}
          <div className="p-4 border-t border-[#222] bg-[#080808] z-30 mb-16 md:mb-0">
-            <div className="flex items-start space-x-3 opacity-80 hover:opacity-100 transition-opacity">
+            <div className="flex items-start space-x-3 opacity-80 hover:opacity-100 transition-opacity mb-4">
                 <div className="mt-0.5 text-green-500">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                       <path fillRule="evenodd" d="M12 1.5a5.25 5.25 0 00-5.25 5.25v3a3 3 0 00-3 3v6.75a3 3 0 003 3h10.5a3 3 0 003-3v-6.75a3 3 0 00-3-3v-3c0-2.9-2.35-5.25-5.25-5.25zm3.75 8.25v-3a3.75 3.75 0 10-7.5 0v3h7.5z" clipRule="evenodd" />
@@ -153,6 +279,18 @@ const App: React.FC = () => {
                     <span className="text-[#00dbff] font-bold block mb-0.5 tracking-wider">PRIVACY PROTOCOL: SECURE</span>
                     Photos are processed in browser RAM only. No cloud storage. 
                     <span className="block mt-0.5 text-gray-600">Session data wipes on refresh.</span>
+                </div>
+            </div>
+
+            {/* Developer Info */}
+            <div className="pt-3 border-t border-[#222] opacity-60 hover:opacity-100 transition-opacity">
+                <div className="flex items-center justify-between text-[9px] font-mono text-gray-500 mb-1">
+                    <span className="tracking-widest">DEVELOPER</span>
+                    <span className="text-gray-300">UncleLee</span>
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-mono text-gray-500">
+                    <span className="tracking-widest">CONTACT</span>
+                    <a href="mailto:975022570yp@gmail.com" className="text-[#00dbff] hover:text-white transition-colors">975022570yp@gmail.com</a>
                 </div>
             </div>
          </div>
@@ -167,11 +305,39 @@ const App: React.FC = () => {
             </span>
          </div>
 
+         {/* GUIDE / STATUS BAR */}
+         <div className="absolute top-[80px] md:top-4 left-0 right-0 z-30 flex justify-center pointer-events-none">
+            <div className="bg-black/70 backdrop-blur border border-[#333] px-5 py-2 rounded-full flex items-center space-x-4 shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                <div className={`flex items-center space-x-2 ${!selectedCharacter ? 'text-[#00dbff] animate-pulse' : 'text-gray-500'}`}>
+                    <div className={`w-2 h-2 rounded-full ${!selectedCharacter ? 'bg-[#00dbff]' : 'bg-gray-700'}`}></div>
+                    <span className="text-[10px] font-mono font-bold tracking-widest">1. SELECT HERO</span>
+                </div>
+                <div className="text-gray-700 text-[10px]">////////////////</div>
+                <div className={`flex items-center space-x-2 ${selectedCharacter ? 'text-[#ff00ff] animate-pulse' : 'text-gray-500'}`}>
+                     <div className={`w-2 h-2 rounded-full ${selectedCharacter ? 'bg-[#ff00ff]' : 'bg-gray-700'}`}></div>
+                    <span className="text-[10px] font-mono font-bold tracking-widest">2. UPLOAD / SNAP</span>
+                </div>
+            </div>
+         </div>
+
          {/* Subtle Vignette */}
          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0%,#000000_100%)] pointer-events-none"></div>
          
-         <div className="relative z-20 flex-1 w-full flex items-center justify-center pt-12 md:pt-0">
-             <div className="transform scale-90 md:scale-100 transition-transform origin-top w-full flex justify-center">
+         {/* Main Camera Container - Draggable & Resizable */}
+         <div className="relative z-20 flex-1 w-full flex items-start justify-center pt-24 md:pt-10 overflow-visible">
+             <div 
+                className="origin-top w-full flex justify-center cursor-move touch-none"
+                style={{
+                    transform: `translate(${cameraTransform.x}px, ${cameraTransform.y}px) scale(${cameraTransform.scale})`,
+                    transition: isDraggingCamera ? 'none' : 'transform 0.1s ease-out',
+                    touchAction: 'none'
+                }}
+                onMouseDown={handleCameraMouseDown}
+                onWheel={handleCameraWheel}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                title="Drag to move, Scroll or Pinch to zoom"
+             >
                 <CyberpunkCamera 
                     selectedCharacter={selectedCharacter}
                     onCapture={handleCapture}
